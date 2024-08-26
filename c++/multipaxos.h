@@ -8,6 +8,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -180,6 +181,9 @@ class MultiPaxos : public multipaxos::MultiPaxosRPC::Service {
 
   std::atomic<bool> commit_thread_running_;
   std::thread commit_thread_;
+
+  size_t partition_size_;
+  std::hash<std::string> hash_function;
 };
 
 struct prepare_state_t {

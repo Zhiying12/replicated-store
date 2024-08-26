@@ -31,6 +31,7 @@ message Instance {
   int64 client_id = 3;
   InstanceState state = 4;
   Command command = 5;
+  int64 partition_index = 6;
 }
 
 message PrepareRequest {

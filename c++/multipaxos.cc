@@ -43,7 +43,8 @@ MultiPaxos::MultiPaxos(Log* log, json const& config)
       thread_pool_(config["threadpool_size"]),
       rpc_server_running_(false),
       prepare_thread_running_(false),
-      commit_thread_running_(false) {
+      commit_thread_running_(false),
+      partition_size_(config["partition_size"]) {
   int64_t id = 0;
   for (std::string const peer : config["peers"])
     rpc_peers_.emplace_back(id++,
@@ -244,6 +245,7 @@ Result MultiPaxos::RunAcceptPhase(int64_t ballot,
   instance.set_client_id(client_id);
   instance.set_state(INPROGRESS);
   *instance.mutable_command() = std::move(command);
+  int partition_index = hash_function(instance.command().key());
 
   if (ballot == ballot_) {
     ++state->num_rpcs_;
@@ -257,6 +259,7 @@ Result MultiPaxos::RunAcceptPhase(int64_t ballot,
   AcceptRequest request;
   request.set_sender(id_);
   *request.mutable_instance() = std::move(instance);
+  request.set_partition_index(partition_index);
 
   for (auto& peer : rpc_peers_) {
     if (peer.id_ == id_) {
