@@ -30,8 +30,8 @@ http_archive(
   strip_prefix = "googletest-609281088cfefc76f9d0ce82e1ff6c30cc3591e5",
 )
 
-new_local_repository(
-    name = "librocksdb",
-    path = "/home/ubuntu/rocksdb-7.7.3",
-    build_file = "dependency/BUILD",
-)
+# new_local_repository(
+#     name = "librocksdb",
+#     path = "/home/ubuntu/rocksdb-7.7.3",
+#     build_file = "dependency/BUILD",
+# )

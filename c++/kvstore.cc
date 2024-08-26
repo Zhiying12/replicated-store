@@ -1,19 +1,12 @@
 #include "json.h"
 #include "kvstore.h"
 #include "memkvstore.h"
-#include "rocksdbstore.h"
 #include <glog/logging.h>
 
 namespace kvstore {
 
 std::unique_ptr<KVStore> CreateStore(nlohmann::json const& config) {
-  if (config["store"] == "rocksdb") {
-    return std::make_unique<RocksDBStore>(config["db_path"]);
-  } else if (config["store"] == "mem") {
-    return std::make_unique<MemKVStore>();
-  } else {
-      CHECK(false);
-  }
+  return std::make_unique<MemKVStore>();
 }
 
 KVResult Execute(multipaxos::Command const& command, KVStore* store) {

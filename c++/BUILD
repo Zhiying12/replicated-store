@@ -4,7 +4,7 @@ load("@com_github_grpc_grpc//bazel:cc_grpc_library.bzl", "cc_grpc_library")
 cc_library(
     name = "kvstore",
     srcs = ["kvstore.cc"],
-    hdrs = ["kvstore.h", "json.h", "json_fwd.h", "memkvstore.h", "rocksdbstore.h"],
+    hdrs = ["kvstore.h", "json.h", "json_fwd.h", "memkvstore.h"],
     deps = [
         ":multipaxos_cc_proto",
         "@com_github_google_glog//:glog",
@@ -22,17 +22,17 @@ cc_library(
     ],
 )
 
-cc_library(
-    name = "rocksdbstore",
-    srcs = ["rocksdbstore.cc"],
-    hdrs = ["rocksdbstore.h"],
-    deps = [
-        ":kvstore",
-        ":multipaxos_cc_proto",
-        "@com_github_google_glog//:glog",
-        "@librocksdb//:librocksdb",
-    ]
-)
+# cc_library(
+#     name = "rocksdbstore",
+#     srcs = ["rocksdbstore.cc"],
+#     hdrs = ["rocksdbstore.h"],
+#     deps = [
+#         ":kvstore",
+#         ":multipaxos_cc_proto",
+#         "@com_github_google_glog//:glog",
+#         "@librocksdb//:librocksdb",
+#     ]
+# )
 
 cc_library(
     name = "log",
@@ -40,7 +40,6 @@ cc_library(
     hdrs = ["log.h"],
     deps = [
         ":memkvstore",
-        ":rocksdbstore",
         "@com_github_google_glog//:glog",
     ],
 )
@@ -78,7 +77,6 @@ cc_library(
     hdrs = ["multipaxos.h", "json.h", "json_fwd.h"],
     deps = [
         ":memkvstore",
-        ":rocksdbstore",
         ":log",
         ":multipaxos_cc_grpc",
         "@com_github_google_glog//:glog",
@@ -102,7 +100,6 @@ cc_binary(
     srcs = ["main.cc", "replicant.cc", "replicant.h"],
     deps = [
         ":memkvstore",
-        ":rocksdbstore",
         ":log",
         ":multipaxos_cc_grpc",
         ":multipaxos",
