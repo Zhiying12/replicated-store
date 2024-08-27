@@ -29,18 +29,19 @@ class Replicant : public std::enable_shared_from_this<Replicant> {
   void StartExecutorThread();
   void StopExecutorThread();
 
-  void ExecutorThread();
+  void ExecutorThread(int index);
 
   void AcceptClient();
 
   int64_t id_;
-  Log log_;
+  std::vector<Log> logs_;
   MultiPaxos multi_paxos_;
   std::string ip_port_;
   asio::io_context* io_context_;
   asio::ip::tcp::acceptor acceptor_;
   ClientManager client_manager_;
-  std::thread executor_thread_;
+  std::vector<std::thread> executor_threads_;
+  size_t partition_size_;
 };
 
 #endif
