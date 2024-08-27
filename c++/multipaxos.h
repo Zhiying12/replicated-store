@@ -137,8 +137,9 @@ class MultiPaxos : public multipaxos::MultiPaxosRPC::Service {
   Result RunAcceptPhase(int64_t ballot,
                         int64_t index,
                         multipaxos::Command command,
-                        int64_t client_id);
-  int64_t RunCommitPhase(int64_t ballot, int64_t global_last_executed);
+                        int64_t client_id,
+                        int64_t partition_index);
+  void RunCommitPhase(int64_t ballot, std::vector<int64_t>& gles);
 
   void Replay(int64_t ballot,
               std::unordered_map<int64_t, multipaxos::Instance> const& log);
@@ -157,7 +158,7 @@ class MultiPaxos : public multipaxos::MultiPaxosRPC::Service {
                       multipaxos::CommitResponse*) override;
 
   std::atomic<int64_t> ballot_;
-  Log* log_;
+  std::vector<Log> logs_;
   int64_t id_;
   std::atomic<bool> commit_received_;
   long commit_interval_;
@@ -205,11 +206,11 @@ struct accept_state_t {
 };
 
 struct commit_state_t {
-  commit_state_t(int64_t min_last_executed)
-      : num_rpcs_(0), num_oks_(0), min_last_executed_(min_last_executed) {}
+  commit_state_t()
+      : num_rpcs_(0), num_oks_(0) {}
   size_t num_rpcs_;
   size_t num_oks_;
-  int64_t min_last_executed_ = 0;
+  std::vector<int64_t> min_last_executed_;
   std::mutex mu_;
   std::condition_variable cv_;
 };

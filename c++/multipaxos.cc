@@ -31,9 +31,9 @@ using multipaxos::PrepareResponse;
 using multipaxos::AcceptRequest;
 using multipaxos::AcceptResponse;
 
-MultiPaxos::MultiPaxos(Log* log, json const& config)
+MultiPaxos::MultiPaxos(std::vector<Log>& logs, json const& config)
     : ballot_(kMaxNumPeers),
-      log_(log),
+      logs_(logs),
       id_(config["id"]),
       commit_received_(false),
       commit_interval_(config["commit_interval"]),
@@ -128,9 +128,11 @@ void MultiPaxos::StopCommitThread() {
 
 Result MultiPaxos::Replicate(Command command, int64_t client_id) {
   auto ballot = Ballot();
-  if (IsLeader(ballot, id_))
-    return RunAcceptPhase(ballot, log_->AdvanceLastIndex(), std::move(command),
-                          client_id);
+  if (IsLeader(ballot, id_)) {
+    int64_t p_index = hash_function(instance.command().key());
+    return RunAcceptPhase(ballot, logs_[p_index]->AdvanceLastIndex(), std::move(command),
+                          client_id, p_index);
+  }
   if (IsSomeoneElseLeader(ballot, id_))
     return Result{ResultType::kSomeoneElseLeader, ExtractLeaderId(ballot)};
   return Result{ResultType::kRetry, std::nullopt};
@@ -160,18 +162,21 @@ void MultiPaxos::PrepareThread() {
 }
 
 void MultiPaxos::CommitThread() {
+  std::vector<int64_t> gles(partition_size_, 0);
   while (commit_thread_running_) {
     {
       std::unique_lock lock(mu_);
       while (commit_thread_running_ && !IsLeader(ballot_, id_))
         cv_leader_.wait(lock);
     }
-    auto gle = log_->GlobalLastExecuted();
+    for (int i = 0; i < partition_size_; i++) {
+      gles[i] = logs_[i]->GlobalLastExecuted();
+    }
     while (commit_thread_running_) {
       auto ballot = Ballot();
       if (!IsLeader(ballot, id_))
         break;
-      gle = RunCommitPhase(ballot, gle);
+      RunCommitPhase(ballot, gles);
       SleepForCommitInterval();
     }
   }
@@ -189,8 +194,9 @@ MultiPaxos::RunPreparePhase(int64_t ballot) {
   if (ballot > ballot_) {
     ++state->num_rpcs_;
     ++state->num_oks_;
-    state->log_ = log_->GetLog();
-    state->max_last_index_ = log_->LastIndex();
+    // TODO
+    // state->log_ = log_->GetLog();
+    // state->max_last_index_ = log_->LastIndex();
   } else {
     return std::nullopt;
   }
@@ -236,7 +242,8 @@ MultiPaxos::RunPreparePhase(int64_t ballot) {
 Result MultiPaxos::RunAcceptPhase(int64_t ballot,
                                   int64_t index,
                                   Command command,
-                                  int64_t client_id) {
+                                  int64_t client_id,
+                                  int64_t partition_index) {
   auto state = std::make_shared<accept_state_t>();
 
   Instance instance;
@@ -245,12 +252,11 @@ Result MultiPaxos::RunAcceptPhase(int64_t ballot,
   instance.set_client_id(client_id);
   instance.set_state(INPROGRESS);
   *instance.mutable_command() = std::move(command);
-  int partition_index = hash_function(instance.command().key());
 
   if (ballot == ballot_) {
     ++state->num_rpcs_;
     ++state->num_oks_;
-    log_->Append(instance);
+    logs_[partition_index]->Append(instance);
   } else {
     auto leader = ExtractLeaderId(ballot_);
     return Result{ResultType::kSomeoneElseLeader, leader};
@@ -289,7 +295,7 @@ Result MultiPaxos::RunAcceptPhase(int64_t ballot,
            state->num_rpcs_ != num_peers_)
       state->cv_.wait(lock);
     if (state->num_oks_ > num_peers_ / 2) {
-      log_->Commit(index);
+      logs_[partition_index]->Commit(index);
       return Result{ResultType::kOk, std::nullopt};
     }
     if (!IsLeader(ballot_, id_))
@@ -298,20 +304,23 @@ Result MultiPaxos::RunAcceptPhase(int64_t ballot,
   return Result{ResultType::kRetry, std::nullopt};
 }
 
-int64_t MultiPaxos::RunCommitPhase(int64_t ballot,
-                                   int64_t global_last_executed) {
-  auto state = std::make_shared<commit_state_t>(log_->LastExecuted());
+void MultiPaxos::RunCommitPhase(int64_t ballot,
+                                std::vector<int64_t>& gles) {
+  auto state = std::make_shared<commit_state_t>();
 
   CommitRequest request;
   request.set_ballot(ballot);
   request.set_sender(id_);
-  request.set_last_executed(state->min_last_executed_);
-  request.set_global_last_executed(global_last_executed);
 
   ++state->num_rpcs_;
   ++state->num_oks_;
-  state->min_last_executed_ = log_->LastExecuted();
-  log_->TrimUntil(global_last_executed);
+  for (int i = 0; i < partition_size_; i ++) {
+    auto last_executed = logs_[i].LastExecuted();
+    state->min_last_executed_.emplace_back(last_executed);
+    request.set_last_executed(last_executed);
+    request.set_global_last_executed(gles[i]);
+    logs_[i].TrimUntil(gles[i]);
+  }
 
   for (auto& peer : rpc_peers_) {
     if (peer.id_ == id_) {
@@ -328,8 +337,10 @@ int64_t MultiPaxos::RunCommitPhase(int64_t ballot,
         if (s.ok()) {
           if (response.type() == OK) {
             ++state->num_oks_;
-            if (response.last_executed() < state->min_last_executed_)
-              state->min_last_executed_ = response.last_executed();
+            for (int i = 0; i < partition_size_; i ++) {
+              if (response.last_executed(i) < state->min_last_executed_[i])
+                state->min_last_executed_[i] = response.last_executed(i);
+            }
           } else {
             BecomeFollower(response.ballot());
           }
@@ -342,21 +353,24 @@ int64_t MultiPaxos::RunCommitPhase(int64_t ballot,
     std::unique_lock lock(state->mu_);
     while (IsLeader(ballot_, id_) && state->num_rpcs_ != num_peers_)
       state->cv_.wait(lock);
-    if (state->num_oks_ == num_peers_)
-      return state->min_last_executed_;
+    if (state->num_oks_ == num_peers_) {
+      for (int i = 0; i < partition_size_; i ++) {
+        gles[i] = state->min_last_executed_[i];
+      }
+    }
   }
-  return global_last_executed;
 }
 
 void MultiPaxos::Replay(
     int64_t ballot,
     std::unordered_map<int64_t, multipaxos::Instance> const& log) {
   for (auto const& [index, instance] : log) {
+    int partition_index = hash_function(instance.command().key());
     Result r = RunAcceptPhase(ballot, instance.index(), instance.command(),
-                              instance.client_id());
+                              instance.client_id(), partition_index);
     while (r.type_ == ResultType::kRetry)
       r = RunAcceptPhase(ballot, instance.index(), instance.command(),
-                         instance.client_id());
+                         instance.client_id(), partition_index);
     if (r.type_ == ResultType::kSomeoneElseLeader)
       return;
   }
@@ -368,8 +382,9 @@ Status MultiPaxos::Prepare(ServerContext*,
   DLOG(INFO) << id_ << " <--prepare-- " << request->sender();
   if (request->ballot() > ballot_) {
     BecomeFollower(request->ballot());
-    for (auto& i : log_->Instances())
-      *response->add_instances() = std::move(i);
+    //TODO
+    // for (auto& i : log_->Instances())
+    //   *response->add_instances() = std::move(i);
     response->set_type(OK);
   } else {
     response->set_ballot(ballot_);
@@ -383,7 +398,7 @@ Status MultiPaxos::Accept(ServerContext*,
                           AcceptResponse* response) {
   DLOG(INFO) << id_ << " <--accept--- " << request->sender();
   if (request->instance().ballot() >= ballot_) {
-    log_->Append(request->instance());
+    logs_[request->partition_index()]->Append(request->instance());
     response->set_type(OK);
     if (request->instance().ballot() > ballot_)
       BecomeFollower(request->instance().ballot());
@@ -401,9 +416,11 @@ Status MultiPaxos::Commit(ServerContext*,
   DLOG(INFO) << id_ << " <--commit--- " << request->sender();
   if (request->ballot() >= ballot_) {
     commit_received_ = true;
-    log_->CommitUntil(request->last_executed(), request->ballot());
-    log_->TrimUntil(request->global_last_executed());
-    response->set_last_executed(log_->LastExecuted());
+    for (int i = 0; i < partition_size_; i++) {
+      logs_[i]->CommitUntil(request->last_executed(i), request->ballot());
+      logs_[i]->TrimUntil(request->global_last_executed(i));
+      *response->add_last_executed() = log->LastExecuted();
+    }
     response->set_type(OK);
     if (request->ballot() > ballot_)
       BecomeFollower(request->ballot());
