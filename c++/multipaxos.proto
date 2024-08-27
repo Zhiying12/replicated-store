@@ -57,15 +57,15 @@ message AcceptResponse {
 
 message CommitRequest {
   int64 ballot = 1;
-  int64 last_executed = 2;
-  int64 global_last_executed = 3;
+  repeated int64 last_executed = 2;
+  repeated int64 global_last_executed = 3;
   int64 sender = 4;
 }
 
 message CommitResponse {
   ResponseType type = 1;
   int64 ballot = 2;
-  int64 last_executed = 3;
+  repeated int64 last_executed = 3;
 }
 
 service MultiPaxosRPC {
