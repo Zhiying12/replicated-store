@@ -21,8 +21,7 @@ Replicant::Replicant(asio::io_context* io_context, json const& config)
       client_manager_(id_, config["peers"].size(), &multi_paxos_),
       partition_size_(config["partition_size"]) {
   for (auto i = 0; i < partition_size_; i++) {
-    Log log(kvstore::CreateStore(config));
-    logs_.emplace_back(&log);
+    logs_.emplace_back(new Log(kvstore::CreateStore(config)));
   }
 }
 
