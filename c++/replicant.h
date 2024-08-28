@@ -34,7 +34,7 @@ class Replicant : public std::enable_shared_from_this<Replicant> {
   void AcceptClient();
 
   int64_t id_;
-  std::vector<Log> logs_;
+  std::vector<Log*> logs_;
   MultiPaxos multi_paxos_;
   std::string ip_port_;
   asio::io_context* io_context_;

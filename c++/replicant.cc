@@ -14,15 +14,15 @@ using nlohmann::json;
 
 Replicant::Replicant(asio::io_context* io_context, json const& config)
     : id_(config["id"]),
-      multi_paxos_(&logs_, config),
+      multi_paxos_(logs_, config),
       ip_port_(config["peers"][id_]),
       io_context_(io_context),
       acceptor_(asio::make_strand(*io_context_)),
       client_manager_(id_, config["peers"].size(), &multi_paxos_),
       partition_size_(config["partition_size"]) {
-  logs_.reserve(partition_size_);
   for (auto i = 0; i < partition_size_; i++) {
-    logs_.emplace_back(kvstore::CreateStore(config));
+    Log log(kvstore::CreateStore(config));
+    logs_.emplace_back(&log);
   }
 }
 
@@ -63,7 +63,7 @@ void Replicant::StopServer() {
 
 void Replicant::StartExecutorThread() {
   DLOG(INFO) << id_ << " starting executor thread";
-  for (int i = 0; i < partition_size_; i++) {
+  for (auto i = 0; i < partition_size_; i++) {
     executor_threads_.emplace_back(&Replicant::ExecutorThread, this, i);
   }
 }
@@ -71,7 +71,7 @@ void Replicant::StartExecutorThread() {
 void Replicant::StopExecutorThread() {
   DLOG(INFO) << id_ << " stopping executor thread";
   for (auto& log : logs_) {
-    log.Stop();
+    log->Stop();
   }
   for (auto& t : executor_threads_) {
     t.join();
@@ -80,7 +80,7 @@ void Replicant::StopExecutorThread() {
 
 void Replicant::ExecutorThread(int index) {
   for (;;) {
-    auto r = logs_[index].Execute();
+    auto r = logs_[index]->Execute();
     if (!r)
       break;
     auto [id, result] = std::move(*r);

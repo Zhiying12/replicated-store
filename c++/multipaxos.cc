@@ -31,7 +31,7 @@ using multipaxos::PrepareResponse;
 using multipaxos::AcceptRequest;
 using multipaxos::AcceptResponse;
 
-MultiPaxos::MultiPaxos(std::vector<Log>& logs, json const& config)
+MultiPaxos::MultiPaxos(std::vector<Log*>& logs, json const& config)
     : ballot_(kMaxNumPeers),
       logs_(logs),
       id_(config["id"]),
@@ -129,7 +129,7 @@ void MultiPaxos::StopCommitThread() {
 Result MultiPaxos::Replicate(Command command, int64_t client_id) {
   auto ballot = Ballot();
   if (IsLeader(ballot, id_)) {
-    int64_t p_index = hash_function(instance.command().key());
+    int64_t p_index = hash_function(command.key());
     return RunAcceptPhase(ballot, logs_[p_index]->AdvanceLastIndex(), std::move(command),
                           client_id, p_index);
   }
@@ -169,7 +169,7 @@ void MultiPaxos::CommitThread() {
       while (commit_thread_running_ && !IsLeader(ballot_, id_))
         cv_leader_.wait(lock);
     }
-    for (int i = 0; i < partition_size_; i++) {
+    for (auto i = 0; i < partition_size_; i++) {
       gles[i] = logs_[i]->GlobalLastExecuted();
     }
     while (commit_thread_running_) {
@@ -314,12 +314,12 @@ void MultiPaxos::RunCommitPhase(int64_t ballot,
 
   ++state->num_rpcs_;
   ++state->num_oks_;
-  for (int i = 0; i < partition_size_; i ++) {
-    auto last_executed = logs_[i].LastExecuted();
+  for (auto i = 0; i < partition_size_; i ++) {
+    auto last_executed = logs_[i]->LastExecuted();
     state->min_last_executed_.emplace_back(last_executed);
-    request.set_last_executed(last_executed);
-    request.set_global_last_executed(gles[i]);
-    logs_[i].TrimUntil(gles[i]);
+    request.add_last_executed(last_executed);
+    request.add_global_last_executed(gles[i]);
+    logs_[i]->TrimUntil(gles[i]);
   }
 
   for (auto& peer : rpc_peers_) {
@@ -337,7 +337,7 @@ void MultiPaxos::RunCommitPhase(int64_t ballot,
         if (s.ok()) {
           if (response.type() == OK) {
             ++state->num_oks_;
-            for (int i = 0; i < partition_size_; i ++) {
+            for (auto i = 0; i < partition_size_; i ++) {
               if (response.last_executed(i) < state->min_last_executed_[i])
                 state->min_last_executed_[i] = response.last_executed(i);
             }
@@ -354,7 +354,7 @@ void MultiPaxos::RunCommitPhase(int64_t ballot,
     while (IsLeader(ballot_, id_) && state->num_rpcs_ != num_peers_)
       state->cv_.wait(lock);
     if (state->num_oks_ == num_peers_) {
-      for (int i = 0; i < partition_size_; i ++) {
+      for (auto i = 0; i < partition_size_; i ++) {
         gles[i] = state->min_last_executed_[i];
       }
     }
@@ -416,10 +416,10 @@ Status MultiPaxos::Commit(ServerContext*,
   DLOG(INFO) << id_ << " <--commit--- " << request->sender();
   if (request->ballot() >= ballot_) {
     commit_received_ = true;
-    for (int i = 0; i < partition_size_; i++) {
+    for (auto i = 0; i < partition_size_; i++) {
       logs_[i]->CommitUntil(request->last_executed(i), request->ballot());
       logs_[i]->TrimUntil(request->global_last_executed(i));
-      *response->add_last_executed() = log->LastExecuted();
+      response->add_last_executed(logs_[i]->LastExecuted());
     }
     response->set_type(OK);
     if (request->ballot() > ballot_)

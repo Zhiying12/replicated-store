@@ -60,7 +60,7 @@ inline bool IsSomeoneElseLeader(int64_t ballot, int64_t id) {
 
 class MultiPaxos : public multipaxos::MultiPaxosRPC::Service {
  public:
-  MultiPaxos(Log* log, nlohmann::json const& config);
+  MultiPaxos(std::vector<Log*>& logs, nlohmann::json const& config);
   MultiPaxos(MultiPaxos const& mp) = delete;
   MultiPaxos& operator=(MultiPaxos const& mp) = delete;
   MultiPaxos(MultiPaxos&& mp) = delete;
@@ -81,7 +81,7 @@ class MultiPaxos : public multipaxos::MultiPaxosRPC::Service {
     std::scoped_lock lock(mu_);
     DLOG(INFO) << id_ << " became a leader: ballot: " << ballot_ << " -> "
                << new_ballot;
-    log_->SetLastIndex(new_last_index);
+    logs_[0]->SetLastIndex(new_last_index);
     ballot_ = new_ballot;
     cv_leader_.notify_one();
   }
@@ -158,7 +158,7 @@ class MultiPaxos : public multipaxos::MultiPaxosRPC::Service {
                       multipaxos::CommitResponse*) override;
 
   std::atomic<int64_t> ballot_;
-  std::vector<Log> logs_;
+  std::vector<Log*>& logs_;
   int64_t id_;
   std::atomic<bool> commit_received_;
   long commit_interval_;
